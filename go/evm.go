@@ -177,7 +177,115 @@ func Evm(code []byte) ([]*big.Int, bool) {
 
 			value.Mod(value, new(big.Int).Exp(big.NewInt(2), big.NewInt(256), nil))
 			stack = append([]*big.Int{value}, stack...)
-			
+		case 0x0B:
+			if len(stack) < 2 {
+				return nil, false
+			}
+
+			// Pop b from the stack
+
+			// Pop x from the stack
+
+			// Ensure b is within the bounds of our bit width (0-31 for a 256-bit number)
+
+			// Pop b and x from the stack
+			b := stack[0]
+			x := stack[1]
+			stack = stack[2:]
+
+			// Calculate the sign extension mask
+			bInt := int(b.Int64())
+			if bInt >= 32 {
+				return stack, false
+			}
+			bits := (bInt + 1) * 8
+			signBit := new(big.Int).Lsh(big.NewInt(1), uint(bits-1))
+
+			// Check if the sign bit is set
+			if x.Cmp(signBit) >= 0 {
+				// If the sign bit is set, extend with 1s
+				extended := new(big.Int).Lsh(big.NewInt(1), uint(256-bits))
+				extended.Sub(extended, big.NewInt(1))
+				extended.Lsh(extended, uint(bits))
+				x.Or(x, extended)
+			} else {
+				// Ensure higher bits are zero
+				mask := new(big.Int).Lsh(big.NewInt(1), uint(bits))
+				mask.Sub(mask, big.NewInt(1))
+				x.And(x, mask)
+			}
+
+			// Push the result back onto the stack
+			stack = append([]*big.Int{x}, stack...)
+
+		case 0x05:
+			if len(stack) < 2 {
+				return nil, false
+			}
+
+			if stack[1].Cmp(big.NewInt(0)) == 0 {
+				stack = stack[2:]
+				stack = append([]*big.Int{big.NewInt(0)}, stack...)
+			} else {
+				value1 := stack[0].Int64()
+				int8Value1 := int8(value1)
+				value2 := stack[1].Int64()
+				int8Value2 := int8(value2)
+
+				value := int8Value1 / int8Value2
+
+				bits := 8
+
+				// Check if the sign bit is set
+				if value < 0 {
+					value8 := new(big.Int).Add(big.NewInt(int64(256)), big.NewInt(int64(value)))
+					// If the sign bit s set, extend with 1s
+					extended := new(big.Int).Lsh(big.NewInt(1), uint(256-bits))
+					extended.Sub(extended, big.NewInt(1))
+					extended.Lsh(extended, uint(bits))
+					value8.Or(value8, extended)
+					stack = stack[2:]
+					stack = append([]*big.Int{value8}, stack...)
+				} else {
+					stack = stack[2:]
+					stack = append([]*big.Int{big.NewInt(int64(value))}, stack...)
+				}
+
+			}
+		case 0x07:
+			if len(stack) < 2 {
+				return nil, false
+			}
+
+			if stack[1].Cmp(big.NewInt(0)) == 0 {
+				stack = stack[2:]
+				stack = append([]*big.Int{big.NewInt(0)}, stack...)
+			} else {
+				value1 := stack[0].Int64()
+				int8Value1 := int8(value1)
+				value2 := stack[1].Int64()
+				int8Value2 := int8(value2)
+
+				value := int8Value1 % int8Value2
+
+				bits := 8
+
+				// Check if the sign bit is set
+				if value < 0 {
+					value8 := new(big.Int).Add(big.NewInt(int64(256)), big.NewInt(int64(value)))
+					// If the sign bit s set, extend with 1s
+					extended := new(big.Int).Lsh(big.NewInt(1), uint(256-bits))
+					extended.Sub(extended, big.NewInt(1))
+					extended.Lsh(extended, uint(bits))
+					value8.Or(value8, extended)
+					stack = stack[2:]
+					stack = append([]*big.Int{value8}, stack...)
+				} else {
+					stack = stack[2:]
+					stack = append([]*big.Int{big.NewInt(int64(value))}, stack...)
+				}
+
+			}
 
 		}
 
