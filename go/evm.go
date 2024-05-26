@@ -287,6 +287,152 @@ func Evm(code []byte) ([]*big.Int, bool) {
 
 			}
 
+		case 0x10:
+			if len(stack) < 2 {
+				return nil, false
+			}
+
+			if stack[0].Cmp(stack[1]) == 0 || stack[0].Cmp(stack[1]) == 1 {
+				stack = stack[2:]
+				stack = append([]*big.Int{big.NewInt(0)}, stack...)
+			} else {
+				stack = stack[2:]
+				stack = append([]*big.Int{big.NewInt(1)}, stack...)
+			}
+		case 0x11:
+			if len(stack) < 2 {
+				return nil, false
+			}
+
+			if stack[0].Cmp(stack[1]) == 0 || stack[0].Cmp(stack[1]) == -1 {
+				stack = stack[2:]
+				stack = append([]*big.Int{big.NewInt(0)}, stack...)
+			} else {
+				stack = stack[2:]
+				stack = append([]*big.Int{big.NewInt(1)}, stack...)
+			}
+		case 0x12:
+			if len(stack) < 2 {
+				return nil, false
+			}
+
+			value1 := stack[0].Int64()
+			int8Value1 := int8(value1)
+			value2 := stack[1].Int64()
+			int8Value2 := int8(value2)
+
+			if int8Value1 < int8Value2 {
+				value := 1
+				stack = stack[2:]
+				stack = append([]*big.Int{big.NewInt(int64(value))}, stack...)
+			} else {
+				value := 0
+				stack = stack[2:]
+				stack = append([]*big.Int{big.NewInt(int64(value))}, stack...)
+			}
+		case 0x13:
+			if len(stack) < 2 {
+				return nil, false
+			}
+
+			value1 := stack[0].Int64()
+			int8Value1 := int8(value1)
+			value2 := stack[1].Int64()
+			int8Value2 := int8(value2)
+
+			if int8Value1 > int8Value2 {
+				value := 1
+				stack = stack[2:]
+				stack = append([]*big.Int{big.NewInt(int64(value))}, stack...)
+			} else {
+				value := 0
+				stack = stack[2:]
+				stack = append([]*big.Int{big.NewInt(int64(value))}, stack...)
+			}
+		case 0x14:
+			if len(stack) < 2 {
+				return nil, false
+			}
+
+			if stack[0].Cmp(stack[1]) == 0 {
+				stack = stack[2:]
+				stack = append([]*big.Int{big.NewInt(1)}, stack...)
+			} else {
+				stack = stack[2:]
+				stack = append([]*big.Int{big.NewInt(0)}, stack...)
+			}
+
+		case 0x15:
+
+			if stack[0].Cmp(big.NewInt(0)) == 0 {
+				stack = stack[1:]
+				stack = append([]*big.Int{big.NewInt(1)}, stack...)
+			} else {
+				stack = stack[1:]
+				stack = append([]*big.Int{big.NewInt(0)}, stack...)
+			}
+
+		case 0x19:
+			UINT256Max := new(big.Int).Sub(new(big.Int).Exp(big.NewInt(2), big.NewInt(256), nil), big.NewInt(1))
+			value := new(big.Int).Xor(UINT256Max, stack[0])
+
+			stack = stack[1:]
+			stack = append([]*big.Int{value}, stack...)
+
+			// Check if the sign bit is
+
+		case 0x16:
+			value := new(big.Int).And(stack[0], stack[1])
+
+			stack = stack[2:]
+			stack = append([]*big.Int{value}, stack...)
+		case 0x17:
+			value := new(big.Int).Or(stack[0], stack[1])
+
+			stack = stack[2:]
+			stack = append([]*big.Int{value}, stack...)
+		case 0x18:
+			value := new(big.Int).Xor(stack[0], stack[1])
+
+			stack = stack[2:]
+			stack = append([]*big.Int{value}, stack...)
+
+		case 0x1B:
+			if len(stack) < 2 {
+				return nil, false
+			}
+
+			extended := stack[1]
+			UINT256Max := new(big.Int).Sub(new(big.Int).Exp(big.NewInt(2), big.NewInt(256), nil), big.NewInt(1))
+
+			if stack[0].Cmp(big.NewInt(255)) > 1 {
+				extended = big.NewInt(0)
+			} else {
+				extended = new(big.Int).Lsh(stack[1], uint(stack[0].Int64()))
+				extended.And(extended, UINT256Max)
+			}
+
+			stack = stack[2:]
+			stack = append([]*big.Int{extended}, stack...)
+
+		case 0x1C:
+			if len(stack) < 2 {
+				return nil, false
+			}
+
+			extended := stack[1]
+			UINT256Max := new(big.Int).Sub(new(big.Int).Exp(big.NewInt(2), big.NewInt(256), nil), big.NewInt(1))
+
+			if stack[0].Cmp(big.NewInt(255)) > 1 {
+				extended = big.NewInt(0)
+			} else {
+				extended = new(big.Int).Rsh(stack[1], uint(stack[0].Int64()))
+				extended.And(extended, UINT256Max)
+			}
+
+			stack = stack[2:]
+			stack = append([]*big.Int{extended}, stack...)
+
 		}
 
 	}
