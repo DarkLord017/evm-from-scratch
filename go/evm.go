@@ -47,6 +47,13 @@ func Evm(code []byte) ([]*big.Int, bool) {
 			value := new(big.Int).SetBytes(code[pc : pc+2])
 			stack = append([]*big.Int{value}, stack...)
 			pc += 2
+		case 0x62:
+			if pc+3 > len(code) {
+				return nil, false // Error: not enough bytes left for PUSH3
+			}
+			value := new(big.Int).SetBytes(code[pc : pc+3])
+			stack = append([]*big.Int{value}, stack...)
+			pc += 3
 		case 0x63:
 			if pc+4 > len(code) {
 				return nil, false // Error: not enough bytes left for PUSH4
@@ -433,6 +440,89 @@ func Evm(code []byte) ([]*big.Int, bool) {
 			stack = stack[2:]
 			stack = append([]*big.Int{extended}, stack...)
 
+		case 0x1D:
+			if len(stack) < 2 {
+				return nil, false
+			}
+			extended := stack[1]
+			UINT256Max := new(big.Int).Sub(new(big.Int).Exp(big.NewInt(2), big.NewInt(256), nil), big.NewInt(1))
+			INT256MAX := new(big.Int).Sub(new(big.Int).Exp(big.NewInt(2), big.NewInt(255), nil), big.NewInt(1))
+			Check_val := new(big.Int).Sub(INT256MAX, extended)
+			if stack[0].Cmp(big.NewInt(256)) != -1 {
+				mask := big.NewInt(1)
+				mask = mask.Lsh(mask, 255)
+				// Create a mask for the first bit
+				firstBitMask := stack[1]
+				// Assuming mask is 256 bits
+
+				// Extract the first bit of mask
+				firstBit := new(big.Int).And(mask, firstBitMask)
+
+				if firstBit.Cmp(big.NewInt(0)) == 0 {
+					// If the first bit is 0
+					extended = new(big.Int).Lsh(mask, 1)
+				} else {
+					// If the first bit is 1
+					mask = new(big.Int).Lsh(mask, 1)
+					mask = new(big.Int).Sub(mask, big.NewInt(1))
+					extended = mask
+				}
+
+			} else {
+				if Check_val.Cmp(big.NewInt(0)) == -1 {
+					extended := stack[1]
+					shift := uint(stack[0].Uint64())
+
+					// Create a mask that has ones in the positions that should be filled with ones after the shift
+					mask := new(big.Int).Lsh(big.NewInt(1), shift)
+					mask.Sub(mask, big.NewInt(1))
+					mask.Lsh(mask, 256-shift)
+
+					// Perform the right shift and apply the mask
+					extended.Rsh(extended, shift)
+					extended.Or(extended, mask)
+				} else {
+					extended.Rsh(extended, uint(stack[0].Int64()))
+				}
+			}
+
+			extended.And(extended, UINT256Max)
+			stack = stack[2:]
+
+			stack = append([]*big.Int{extended}, stack...)
+
+		case 0x1A:
+			extended := stack[1]
+			UINT256Max := new(big.Int).Sub(new(big.Int).Exp(big.NewInt(2), big.NewInt(256), nil), big.NewInt(1))
+			extended.And(extended, UINT256Max)
+			mask := big.NewInt(255)
+
+			shift := (31 - stack[0].Int64()) * 8
+			if shift >= 0 && shift <= 256 {
+				mask = mask.Lsh(mask, uint(shift))
+			}
+
+			extended = extended.And(extended, mask)
+			extended = extended.Rsh(extended, uint(shift))
+			extended = extended.And(extended, big.NewInt(255))
+			stack = stack[2:]
+			stack = append([]*big.Int{extended}, stack...)
+		case 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E, 0x8F:
+			op2 := op - 0x80
+
+			dup := stack[op2]
+			stack = append([]*big.Int{dup}, stack...)
+		case 0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9A, 0x9B, 0x9C, 0x9D, 0x9E, 0x9F:
+			op2 := op - 0x90
+			toSwap := stack[op2+1]
+			top := stack[0]
+			stack[0] = toSwap
+			stack[op2+1] = top
+		case 0xFE:
+			return nil, false
+
+			// case 0x58:
+			// 	op := code[pc]
 		}
 
 	}
