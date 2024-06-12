@@ -14,6 +14,28 @@ import (
 	"math/big"
 )
 
+func jumpdest(pc int, code []byte, stack []*big.Int) (int, []*big.Int, bool) {
+	stack = []*big.Int{}
+loop:
+	for i := pc; i < len(code); i++ {
+		if code[i] == 0x5B {
+
+			switch code[i-1] {
+			case 0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F:
+
+			default:
+				pc = i
+				break loop
+			}
+		}
+		if i == len(code)-1 && code[len(code)-1] != 0x5B {
+			return pc, stack, false
+		}
+
+	}
+	return pc, stack, true
+}
+
 // Run runs the EVM code and returns the stack and a success indicator.
 func Evm(code []byte) ([]*big.Int, bool) {
 	var stack []*big.Int
@@ -521,8 +543,41 @@ func Evm(code []byte) ([]*big.Int, bool) {
 		case 0xFE:
 			return nil, false
 
-			// case 0x58:
-			// 	op := code[pc]
+		case 0x58:
+
+			counter := 0
+			for i := pc - 2; i >= 0; i-- {
+				if i < len(code) {
+					if code[i] == 60 {
+						counter = counter + 2
+					} else {
+						counter++
+					}
+				}
+
+			}
+			stack = append([]*big.Int{big.NewInt(int64(counter))}, stack...)
+		case 0x5A:
+			UINT256Max := new(big.Int).Sub(new(big.Int).Exp(big.NewInt(2), big.NewInt(256), nil), big.NewInt(1))
+			stack = append([]*big.Int{UINT256Max}, stack...)
+		case 0x56:
+			hello := true
+			pc, stack, hello = jumpdest(pc, code, stack)
+			if !hello {
+				return stack, false
+			}
+		case 0x57:
+			value := stack[1]
+			if value.Cmp(big.NewInt(0)) != 0 {
+				hello := true
+				pc, stack, hello = jumpdest(pc, code, stack)
+				if !hello {
+					return stack, false
+				}
+			} else {
+				stack = []*big.Int{}
+
+			}
 		}
 
 	}
