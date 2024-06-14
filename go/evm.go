@@ -12,7 +12,26 @@ package evm
 
 import (
 	"math/big"
+
+	"golang.org/x/crypto/sha3"
 )
+
+type Transaction struct {
+	To       string `json:"to"`
+	From     string `json:"from"`
+	Origin   string `json:"origin"`
+	Gasprice string `json:"gasprice"`
+}
+
+type block struct {
+	Basefee    string `json:"basefee"`
+	Coinbase   string `json:"coinbase"`
+	Timestamp  string `json:"timestamp"`
+	Number     string `json:"number"`
+	Difficulty string `json:"difficulty"`
+	Gaslimit   string `json:"gaslimit"`
+	ChainId    string `json:"chainId"`
+}
 
 func jumpdest(pc int, code []byte, stack []*big.Int) (int, []*big.Int, bool) {
 	stack = []*big.Int{}
@@ -36,9 +55,57 @@ loop:
 	return pc, stack, true
 }
 
+type Memory struct {
+	data      []byte
+	offsetMax int
+}
+
+func NewMemory(size int) *Memory {
+	return &Memory{
+		data:      make([]byte, size),
+		offsetMax: 0,
+	}
+}
+
+// Store stores 32 bytes in memory at the specified offset.
+func (m *Memory) Store(offset int, value []byte) {
+	m.MSIZE(offset)
+	copy(m.data[offset:], value)
+}
+
+// Load loads 32 bytes from memory at the specified offset.
+func (m *Memory) Load(offset int) []byte {
+	m.MSIZE(offset)
+	return m.data[offset : offset+32]
+}
+
+func (m *Memory) LoadforSHA3(offset int, size int) []byte {
+	m.MSIZE(offset)
+	return m.data[offset : offset+size]
+}
+
+func (m *Memory) Store8(offset int, value byte) {
+	m.MSIZE(offset - 32)
+	m.data[offset] = value
+}
+
+func (m *Memory) MSIZE(offset int) int {
+	if offset+32 > m.offsetMax {
+		m.offsetMax = offset + 32
+	}
+	return m.offsetMax
+}
+
+func (m *Memory) GetOffsetMax() int {
+	return m.offsetMax
+}
+
 // Run runs the EVM code and returns the stack and a success indicator.
-func Evm(code []byte) ([]*big.Int, bool) {
+func Evm(code []byte, transaction Transaction, Block block) ([]*big.Int, bool) {
+
 	var stack []*big.Int
+	memory := NewMemory(1024)
+	// 1024 bytes of memory
 	pc := 0
 
 	for pc < len(code) {
@@ -578,6 +645,184 @@ func Evm(code []byte) ([]*big.Int, bool) {
 				stack = []*big.Int{}
 
 			}
+
+		case 0x52: // MSTORE
+			offset := stack[0]
+			stack = stack[1:]
+			value := stack[0]
+			stack = stack[1:]
+			offsetInt := int(offset.Int64())
+			valueBytes := value.Bytes()
+
+			if len(valueBytes) < 32 {
+				padding := make([]byte, 32-len(valueBytes))
+				valueBytes = append(padding, valueBytes...)
+			}
+			memory.Store(offsetInt, valueBytes)
+		case 0x51: // MLOAD
+			offset := stack[0]
+			stack = stack[1:]
+			offsetInt := int(offset.Int64())
+			value := new(big.Int).SetBytes(memory.Load(offsetInt))
+			stack = append([]*big.Int{value}, stack...)
+		case 0x53: // MSTORE8
+			offset := stack[0]
+
+			stack = stack[1:]
+
+			value := int8(stack[0].Int64())
+			stack = stack[1:]
+			offsetInt := int(offset.Uint64())
+			memory.Store8(offsetInt, byte(value))
+		case 0x59:
+			value := memory.GetOffsetMax()
+			m := 32
+			final_val := ((value + m - 1) / m) * m
+			stack = append([]*big.Int{big.NewInt(int64(final_val))}, stack...)
+		case 0x20:
+			offset := stack[0]
+			stack = stack[1:]
+			size := stack[0]
+			stack = stack[1:]
+			data := memory.LoadforSHA3(int(offset.Int64()), int(size.Int64()))
+			hash := sha3.NewLegacyKeccak256()
+			_, err := hash.Write(data)
+			if err != nil {
+				panic(err)
+			}
+			result := hash.Sum(nil)
+
+			stack = append([]*big.Int{new(big.Int).SetBytes(result)}, stack...)
+		case 0x30:
+			// Check if the 'to' address is not empty
+			if len(transaction.To) == 0 {
+				return nil, false
+			}
+			toAddress := transaction.To
+			// Remove the "0x" prefix if present
+
+			toAddress = toAddress[2:]
+
+			// Convert hex string to big.Int
+			bigInt := new(big.Int)
+			bigInt.SetString(toAddress, 16)
+			stack = append([]*big.Int{bigInt}, stack...)
+		case 0x33:
+			if len(transaction.From) == 0 {
+				return nil, false
+			}
+			toAddress := transaction.From
+			// Remove the "0x" prefix if present
+
+			toAddress = toAddress[2:]
+
+			// Convert hex string to big.Int
+			bigInt := new(big.Int)
+			bigInt.SetString(toAddress, 16)
+			stack = append([]*big.Int{bigInt}, stack...)
+		case 0x32:
+			if len(transaction.Origin) == 0 {
+				return nil, false
+			}
+			toAddress := transaction.Origin
+			// Remove the "0x" prefix if present
+
+			toAddress = toAddress[2:]
+
+			// Convert hex string to big.Int
+			bigInt := new(big.Int)
+			bigInt.SetString(toAddress, 16)
+			stack = append([]*big.Int{bigInt}, stack...)
+		case 0x3A:
+			if len(transaction.Gasprice) == 0 {
+				return nil, false
+			}
+			toAddress := transaction.Gasprice
+			toAddress = toAddress[2:]
+
+			// Convert hex string to big.Int
+			bigInt := new(big.Int)
+			bigInt.SetString(toAddress, 16)
+			stack = append([]*big.Int{bigInt}, stack...)
+		case 0x48:
+			if len(Block.Basefee) == 0 {
+				return nil, false
+			}
+			toAddress := Block.Basefee
+			toAddress = toAddress[2:]
+
+			bigInt := new(big.Int)
+			bigInt.SetString(toAddress, 16)
+			stack = append([]*big.Int{bigInt}, stack...)
+		case 0x41:
+			if len(Block.Coinbase) == 0 {
+				return nil, false
+			}
+
+			toAddress := Block.Coinbase
+			toAddress = toAddress[2:]
+
+			bigInt := new(big.Int)
+			bigInt.SetString(toAddress, 16)
+			stack = append([]*big.Int{bigInt}, stack...)
+
+		case 0x42:
+			if len(Block.Timestamp) == 0 {
+				return nil, false
+			}
+
+			toAddress := Block.Timestamp
+			toAddress = toAddress[2:]
+
+			bigInt := new(big.Int)
+			bigInt.SetString(toAddress, 16)
+			stack = append([]*big.Int{bigInt}, stack...)
+
+		case 0x43:
+			if len(Block.Number) == 0 {
+				return nil, false
+			}
+
+			toAddress := Block.Number
+			toAddress = toAddress[2:]
+
+			bigInt := new(big.Int)
+			bigInt.SetString(toAddress, 16)
+			stack = append([]*big.Int{bigInt}, stack...)
+		case 0x44:
+			if len(Block.Difficulty) == 0 {
+				return nil, false
+			}
+
+			toAddress := Block.Difficulty
+			toAddress = toAddress[2:]
+
+			bigInt := new(big.Int)
+			bigInt.SetString(toAddress, 16)
+			stack = append([]*big.Int{bigInt}, stack...)
+		case 0x45:
+			if len(Block.Gaslimit) == 0 {
+				return nil, false
+			}
+
+			toAddress := Block.Gaslimit
+			toAddress = toAddress[2:]
+
+			bigInt := new(big.Int)
+			bigInt.SetString(toAddress, 16)
+			stack = append([]*big.Int{bigInt}, stack...)
+		case 0x46:
+			if len(Block.ChainId) == 0 {
+				return nil, false
+			}
+
+			toAddress := Block.ChainId
+			toAddress = toAddress[2:]
+
+			bigInt := new(big.Int)
+			bigInt.SetString(toAddress, 16)
+			stack = append([]*big.Int{bigInt}, stack...)
+
 		}
 
 	}
