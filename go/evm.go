@@ -11,7 +11,10 @@
 package evm
 
 import (
+	"encoding/hex"
+	"fmt"
 	"math/big"
+	"strings"
 
 	"golang.org/x/crypto/sha3"
 )
@@ -21,6 +24,8 @@ type Transaction struct {
 	From     string `json:"from"`
 	Origin   string `json:"origin"`
 	Gasprice string `json:"gasprice"`
+	Value    string `json:"value"`
+	Data     string `json:"data"`
 }
 
 type block struct {
@@ -32,6 +37,18 @@ type block struct {
 	Gaslimit   string `json:"gaslimit"`
 	ChainId    string `json:"chainId"`
 }
+
+type Account struct {
+	Balance  string   `json:"balance"`
+	UserCode usercode `json:"code"`
+}
+
+type usercode struct {
+	Asm string `json:"asm"`
+	Bin string `json:"bin"`
+}
+
+type Accounts map[string]Account
 
 func jumpdest(pc int, code []byte, stack []*big.Int) (int, []*big.Int, bool) {
 	stack = []*big.Int{}
@@ -53,6 +70,32 @@ loop:
 
 	}
 	return pc, stack, true
+}
+
+type Storage struct {
+	data      []byte
+	offsetMax int
+}
+
+type Store map[string]Storage
+
+func NewStorage(size int) *Storage {
+	return &Storage{
+		data:      make([]byte, size),
+		offsetMax: 0,
+	}
+}
+
+// Store stores 32 bytes in memory at the specified offset.
+func (m *Storage) Store(value []byte) {
+
+	m.data = append(m.data, value...)
+}
+
+// Load loads 32 bytes from memory at the specified offset.
+func (m *Storage) Load(offset int) []byte {
+
+	return m.data[offset:]
 }
 
 type Memory struct {
@@ -101,10 +144,11 @@ func (m *Memory) GetOffsetMax() int {
 }
 
 // Run runs the EVM code and returns the stack and a success indicator.
-func Evm(code []byte, transaction Transaction, Block block) ([]*big.Int, bool) {
-
+func Evm(code []byte, transaction Transaction, Block block, state Accounts) ([]*big.Int, bool) {
+	// var account Account
 	var stack []*big.Int
 	memory := NewMemory(1024)
+	sstore := make(map[string]Storage)
 	// 1024 bytes of memory
 	pc := 0
 
@@ -172,6 +216,14 @@ func Evm(code []byte, transaction Transaction, Block block) ([]*big.Int, bool) {
 			value := new(big.Int).SetBytes(code[pc : 11+pc])
 			stack = append([]*big.Int{value}, stack...)
 			pc += 11
+		case 0x73:
+			if pc+20 > len(code) {
+				return nil, false
+			}
+			value := new(big.Int).SetBytes(code[pc : 20+pc])
+			stack = append([]*big.Int{value}, stack...)
+			pc += 20
+
 		case 0x7F:
 			if pc+32 > len(code) {
 				return nil, false
@@ -706,7 +758,7 @@ func Evm(code []byte, transaction Transaction, Block block) ([]*big.Int, bool) {
 			// Convert hex string to big.Int
 			bigInt := new(big.Int)
 			bigInt.SetString(toAddress, 16)
-			stack = append([]*big.Int{bigInt}, stack...)
+			stack = append([]*big.Int{new(big.Int).Set(bigInt)}, stack...)
 		case 0x33:
 			if len(transaction.From) == 0 {
 				return nil, false
@@ -822,6 +874,202 @@ func Evm(code []byte, transaction Transaction, Block block) ([]*big.Int, bool) {
 			bigInt := new(big.Int)
 			bigInt.SetString(toAddress, 16)
 			stack = append([]*big.Int{bigInt}, stack...)
+		case 0x31:
+			value := stack[0]
+			stack = stack[1:]
+			hexValue := fmt.Sprintf("0x%x", value)
+			if account, exists := state[hexValue]; exists {
+
+				toAddress := account.Balance
+				toAddress = toAddress[2:]
+
+				bigInt := new(big.Int)
+				bigInt.SetString(toAddress, 16)
+				stack = append([]*big.Int{bigInt}, stack...)
+			} else {
+				stack = append([]*big.Int{big.NewInt(0)}, stack...)
+			}
+		case 0x34:
+			toAddress := transaction.Value
+			toAddress = toAddress[2:]
+
+			bigInt := new(big.Int)
+			bigInt.SetString(toAddress, 16)
+			stack = append([]*big.Int{bigInt}, stack...)
+		case 0x35:
+			offset := stack[0].Int64() * 2
+			stack = stack[1:]
+			CallDataFull := transaction.Data
+
+			CallDataFull = CallDataFull[offset:]
+			if len(CallDataFull) < 64 {
+				padding := 64 - len(CallDataFull)
+				CallDataFull += strings.Repeat("0", padding)
+			}
+
+			bigInt := new(big.Int)
+			bigInt.SetString(CallDataFull, 16)
+			stack = append([]*big.Int{bigInt}, stack...)
+
+		case 0x36:
+
+			bigInt := len(transaction.Data) / 2
+			stack = append([]*big.Int{big.NewInt(int64(bigInt))}, stack...)
+
+		case 0x37: // CALLDATACOPY
+			destOffset := int(stack[0].Int64())
+			offset := int(stack[1].Int64())
+			size := int(stack[2].Int64())
+			stack = stack[3:]
+
+			// Convert transaction data from hex string to byte slice
+			data, err := hex.DecodeString(transaction.Data)
+			if err != nil {
+				panic("invalid transaction data")
+			}
+
+			// Initialize the slice to hold the copied data
+			valueBytes := make([]byte, size)
+
+			// Copy the portion of the data from the offset, right-padded with zeros if needed
+			if offset < len(data) {
+				copyEnd := offset + size
+				if copyEnd > len(data) {
+					copyEnd = len(data)
+				}
+				copy(valueBytes, data[offset:copyEnd])
+			}
+
+			// Store the result in memory
+			memory.Store(destOffset, valueBytes)
+		case 0x38:
+			value := len(code)
+
+			stack = append([]*big.Int{big.NewInt(int64(value))}, stack...)
+		case 0x39:
+			destOffset := int(stack[0].Int64())
+			offset := int(stack[1].Int64())
+			size := int(stack[2].Int64())
+			stack = stack[3:]
+
+			// Convert transaction data from hex string to byte slice
+			data := code
+
+			// Initialize the slice to hold the copied data
+			valueBytes := make([]byte, size)
+
+			// Copy the portion of the data from the offset, right-padded with zeros if needed
+			if offset < len(data) {
+				copyEnd := offset + size
+				if copyEnd > len(data) {
+					copyEnd = len(data)
+				}
+				copy(valueBytes, data[offset:copyEnd])
+			}
+
+			// Store the result in memory
+			memory.Store(destOffset, valueBytes)
+		case 0x3b:
+			answer := 0
+			value := stack[0]
+			stack = stack[1:]
+			hexValue := fmt.Sprintf("0x%x", value)
+			// Debugging statement
+			stateEntry := state[hexValue]
+
+			// Convert hex string to byte slice
+			code := stateEntry.UserCode.Bin
+			answer = len(code) / 2
+
+			stack = append([]*big.Int{big.NewInt(int64(answer))}, stack...)
+		case 0x3c:
+			value := stack[0]
+			stack = stack[1:]
+
+			destOffset := int(stack[0].Int64())
+			offset := int(stack[1].Int64())
+			size := int(stack[2].Int64())
+			stack = stack[3:]
+
+			hexValue := fmt.Sprintf("0x%x", value)
+
+			stateEntry := state[hexValue]
+			// Convert transaction data from hex string to byte slice
+			data, err := hex.DecodeString(stateEntry.UserCode.Bin)
+			if err != nil {
+				return nil, false
+			}
+
+			// Initialize the slice to hold the copied data
+			valueBytes := make([]byte, size)
+
+			// Copy the portion of the data from the offset, right-padded with zeros if needed
+			if offset < len(data) {
+				copyEnd := offset + size
+				if copyEnd > len(data) {
+					copyEnd = len(data)
+				}
+				copy(valueBytes, data[offset:copyEnd])
+			}
+
+			// Store the result in memory
+			memory.Store(destOffset, valueBytes)
+		case 0x3f:
+
+			value := stack[0]
+			stack = stack[1:]
+
+			hexValue := fmt.Sprintf("0x%x", value)
+
+			if stateEntry, exists := state[hexValue]; exists {
+				// Convert transaction data from hex string to byte slice}
+				data, err := hex.DecodeString(stateEntry.UserCode.Bin)
+				if err != nil {
+					return nil, false
+				}
+
+				hash := sha3.NewLegacyKeccak256()
+				_, error := hash.Write(data)
+				if error != nil {
+					panic(error)
+				}
+				result := hash.Sum(nil)
+
+				stack = append([]*big.Int{new(big.Int).SetBytes(result)}, stack...)
+			} else {
+				stack = append([]*big.Int{big.NewInt(0)}, stack...)
+			}
+		case 0x47:
+			hexValue := transaction.To
+
+			if account, exists := state[hexValue]; exists {
+
+				toAddress := account.Balance
+				toAddress = toAddress[2:]
+
+				bigInt := new(big.Int)
+				bigInt.SetString(toAddress, 16)
+				stack = append([]*big.Int{bigInt}, stack...)
+			} else {
+				stack = append([]*big.Int{big.NewInt(0)}, stack...)
+			}
+		case 0x55:
+			storage := NewStorage(32)
+			key := stack[0].Bytes()
+			valueBytes := make([]byte, 32)
+			copy(valueBytes, key)
+			stack = stack[1:]
+			storage.data = append(storage.data, stack[0].Bytes()...)
+			stack = stack[1:]
+			sstore[string(valueBytes)] = *storage
+		case 0x54:
+			key := stack[0].Bytes()
+			stack = stack[1:]
+			valueBytes := make([]byte, 32)
+			copy(valueBytes, key)
+			storage := sstore[string(valueBytes)]
+			value := storage.data
+			stack = append([]*big.Int{new(big.Int).SetBytes(value)}, stack...)
 
 		}
 
