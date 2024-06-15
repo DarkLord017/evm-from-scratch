@@ -26,9 +26,16 @@ type code struct {
 	Asm string `json:"asm"`
 }
 
+// type Log struct {
+// 	Address string   `json:"address"`
+// 	Data    string   `json:"data"`
+// 	Topics  []string `json:"topics"`
+// }
+
 type want struct {
 	Stack   []hexBigInt `json:"stack"`
 	Success bool        `json:"success"`
+	Logs    []Log       `json:"logs"`
 	Return  string      `json:"return"`
 }
 
@@ -95,12 +102,15 @@ func TestEVM(t *testing.T) {
 				fatalAndBugReport(t, "hex.DecodeString(%q) error %v", tt.Code.Bin, err)
 			}
 
-			got, gotSuccess := Evm(bin, tt.Tx, tt.Block, tt.State)
+			got, gotSuccess, logs := Evm(bin, tt.Tx, tt.Block, tt.State)
 			if gotSuccess != tt.Want.Success {
 				t.Errorf("Evm(…) got success = %t; want %t", gotSuccess, tt.Want.Success)
 			}
 			if diff := cmp.Diff(toHexStrings(tt.Want.StackInts()), toHexStrings(got), cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("Evm(…) stack mismatch; diff (-want +got)\n%s", diff)
+			}
+			if diff := cmp.Diff(tt.Want.Logs, logs); diff != "" {
+				t.Errorf("Evm(…) logs mismatch; diff (-want +got)\n%s", diff)
 			}
 
 			if t.Failed() {
