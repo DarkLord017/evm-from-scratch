@@ -101,8 +101,8 @@ func TestEVM(t *testing.T) {
 			if err != nil {
 				fatalAndBugReport(t, "hex.DecodeString(%q) error %v", tt.Code.Bin, err)
 			}
-
-			got, gotSuccess, logs := Evm(bin, tt.Tx, tt.Block, tt.State)
+			sstore := make(map[string]Storage)
+			got, gotSuccess, logs, ret , _ := Evm(bin, tt.Tx, tt.Block, tt.State, sstore)
 			if gotSuccess != tt.Want.Success {
 				t.Errorf("Evm(…) got success = %t; want %t", gotSuccess, tt.Want.Success)
 			}
@@ -111,6 +111,9 @@ func TestEVM(t *testing.T) {
 			}
 			if diff := cmp.Diff(tt.Want.Logs, logs); diff != "" {
 				t.Errorf("Evm(…) logs mismatch; diff (-want +got)\n%s", diff)
+			}
+			if diff := cmp.Diff(tt.Want.Return, ret); diff != "" {
+				t.Errorf("Evm(…) return mismatch; diff (-want +got)\n%s", diff)
 			}
 
 			if t.Failed() {
